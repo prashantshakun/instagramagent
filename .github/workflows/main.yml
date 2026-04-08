@@ -2,10 +2,8 @@ name: Instagram Auto-Reply Bot
 
 on:
   schedule:
-    # Runs at the top of every hour
     - cron: '0 * * * *'
   workflow_dispatch:
-    # Allows manual triggering with optional inputs to add new rules
     inputs:
       post_url:
         description: 'Instagram Post or Reel URL'
@@ -16,6 +14,12 @@ on:
       reply_text:
         description: 'Reply text to post publicly'
         required: false
+
+# 🛑 THE FIX: This ensures only one bot instance runs at a time.
+# If a cron job and manual trigger happen together, they will queue up instead of colliding.
+concurrency:
+  group: bot-state
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -28,7 +32,7 @@ jobs:
       - name: 🛎️ Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required to rebase and push properly
+          fetch-depth: 0
 
       - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v5
@@ -49,23 +53,21 @@ jobs:
 
       - name: 💾 Commit and Push changes
         run: |
-          # Configure Git
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # Stage the JSON files (ignoring errors if they don't exist yet)
           git add rules.json processed_comments.json || true
           
-          # Check if there are any changes to commit
           if git diff --staged --quiet; then
             echo "💤 No changes to state files. Skipping commit."
           else
             echo "📝 Committing updated state files..."
             git commit -m "chore: update bot state [skip ci]"
             
-            # Pull with rebase to prevent race conditions if other commits happened
-            git pull --rebase origin main
+            # 🛑 THE FIX: Added '-X theirs'
+            # If a minor conflict occurs, this tells the Git rebase to automatically 
+            # favor the bot's newest generated state instead of failing.
+            git pull --rebase origin main -X theirs
             
-            # Push changes back to the repository
             git push
           fi
