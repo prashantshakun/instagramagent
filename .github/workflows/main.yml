@@ -1,67 +1,71 @@
-name: Instagram Bot Automations
+name: Instagram Auto-Reply Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs automatically every hour to check for new comments
+    # Runs at the top of every hour
+    - cron: '0 * * * *'
   workflow_dispatch:
+    # Allows manual triggering with optional inputs to add new rules
     inputs:
       post_url:
-        description: 'Target Post URL (Leave blank to just run the bot)'
+        description: 'Instagram Post or Reel URL'
         required: false
-        type: string
       keyword:
-        description: 'Trigger Keyword (e.g. link)'
+        description: 'Trigger keyword (case-insensitive)'
         required: false
-        type: string
       reply_text:
-        description: 'Public Reply Text'
+        description: 'Reply text to post publicly'
         required: false
-        type: string
+
+permissions:
+  contents: write
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout code
+      - name: 🛎️ Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Forces GitHub to fetch the full history, preventing conflicts
+          fetch-depth: 0 # Required to rebase and push properly
 
-      - name: Set up Python
+      - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: pip install requests
 
-      - name: Run Agent
+      - name: 🤖 Run agent.py
         env:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
-          # The inputs from the GitHub Web Form:
-          INPUT_POST_URL: ${{ inputs.post_url }}
-          INPUT_KEYWORD: ${{ inputs.keyword }}
-          INPUT_REPLY: ${{ inputs.reply_text }}
+          INPUT_POST_URL: ${{ github.event.inputs.post_url }}
+          INPUT_KEYWORD: ${{ github.event.inputs.keyword }}
+          INPUT_REPLY: ${{ github.event.inputs.reply_text }}
         run: python agent.py
 
-      - name: Save Rules and Progress
+      - name: 💾 Commit and Push changes
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          touch processed_comments.json rules.json
-          git add processed_comments.json rules.json
+          # Configure Git
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          if ! git diff --staged --quiet; then
-            git commit -m "chore: update bot rules and logs [skip ci]"
+          # Stage the JSON files (ignoring errors if they don't exist yet)
+          git add rules.json processed_comments.json || true
+          
+          # Check if there are any changes to commit
+          if git diff --staged --quiet; then
+            echo "💤 No changes to state files. Skipping commit."
+          else
+            echo "📝 Committing updated state files..."
+            git commit -m "chore: update bot state [skip ci]"
             
-            # THE FIX: Download any new changes from GitHub before uploading
+            # Pull with rebase to prevent race conditions if other commits happened
             git pull --rebase origin main
             
+            # Push changes back to the repository
             git push
-          else
-            echo "No new rules or comments to save."
           fi
